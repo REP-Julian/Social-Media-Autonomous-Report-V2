@@ -20,16 +20,16 @@ SMAR is a modern desktop automation suite designed to streamline and automate th
 
 ## 🏗️ Core Technical Architecture
 
-### 🎨 Frontend UI (`src/App.tsx`)
+### 🎨 Frontend UI 
 * **Modern Aesthetic:** Built with a dark glassmorphism layout, featuring rich gradient glows, custom SVGs for platform brand icons, and dynamic status indicator micro-animations.
 * **Event Streaming (SSE):** Subscribes to the backend event stream `/api/events` to dynamically refresh execution logs, progress tracking, and sequence state without browser-polling.
 * **Interactive Authentication:** Intercepts automation status updates to alert the user when a manual login is required, prompting resumption once the user clicks "Confirm Logged In".
 
-### 🌐 Flask Web Server (`backend.py`)
+### 🌐 Flask Web Server 
 * **Control Endpoints:** Exposes REST API routes including `/api/start` to run automation tasks, `/api/stop` to abort runs, `/api/confirm-login` to resume after login verification, and `/api/events` for the SSE stream.
 * **Multi-Threaded Execution:** Coordinates execution safely across background execution threads using Python's `threading.Thread` and thread-safe queues.
 
-### 🤖 Playwright Automation Engine (`backend.py`)
+### 🤖 Playwright Automation Engine
 * **Session Persistence:** Launches local Chrome instances via Playwright's `launch_persistent_context` to retain cookies and login sessions under specific platform profile folders (e.g., `./facebook_chrome_profile`).
 * **Anti-Detection Configurations:** Sets anti-detection arguments such as `--disable-blink-features=AutomationControlled` to minimize platform bot-detection triggers.
 * **Platform Workflows:**
