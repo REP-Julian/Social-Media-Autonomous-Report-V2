@@ -25,6 +25,10 @@ def ensure_protocol(url):
     return url
 
 
+# User data directory for Playwright session persistence
+user_data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "playwright_user_data")
+os.makedirs(user_data_dir, exist_ok=True)
+
 # Global progress tracking variables
 current_progress = 0
 total_reports = 0
@@ -105,19 +109,11 @@ def log_message(msg, level="INFO"):
         })
 
 def wait_for_user(prompt_text, auto_confirm_delay=None):
+    if auto_confirm_delay is not None:
+        time.sleep(1)
+        return
+
     if server_mode:
-        if auto_confirm_delay is not None:
-            log_message(f"{prompt_text} (Auto-closing in {auto_confirm_delay}s)", "INFO")
-            for i in range(auto_confirm_delay, 0, -1):
-                if stop_requested.is_set():
-                    break
-                push_event("log", {
-                    "message": f"Auto-closing browser in {i} seconds...",
-                    "level": "INFO",
-                    "timestamp": time.strftime('%I:%M:%S %p')
-                })
-                time.sleep(1)
-            return
         
         global current_prompt
         current_prompt = prompt_text
@@ -773,11 +769,52 @@ def run_facebook(profile_url, report_limit):
     global active_context
     with sync_playwright() as p:
         try:
-            context = p.chromium.launch_persistent_context(user_data_dir='./facebook_chrome_profile', channel='chrome', headless=False)
+            context = p.chromium.launch_persistent_context(user_data_dir=user_data_dir, channel='chrome', headless=False, args=["--test-type"])
             active_context = context
             page = context.pages[0]
             fb_open_facebook(page, 'https://www.facebook.com/')
             wait_for_user("Please log in to Facebook and press Enter to continue...", None)
+
+            # Verification loop to handle CAPTCHAs, 2FA, and checkpoint screens
+            while not stop_requested.is_set():
+                current_url = page.url
+                
+                # Check if still on the login page
+                is_on_login_page = (
+                    "login" in current_url or 
+                    page.locator("button[name='login']").count() > 0 or 
+                    page.locator("a[data-testid='open-registration-form-button']").count() > 0
+                )
+                
+                # Check for checkpoints, 2FA, or CAPTCHA indicators
+                is_checkpoint = (
+                    "checkpoint" in current_url or 
+                    "two_step_verification" in current_url or 
+                    "captcha" in current_url or 
+                    "security" in current_url
+                )
+                
+                has_captcha_element = False
+                try:
+                    has_captcha_element = (
+                        page.locator("iframe[src*='captcha']").count() > 0 or
+                        page.locator("iframe[title*='recaptcha']").count() > 0 or
+                        page.locator("input[name='approvals_code']").count() > 0 or
+                        page.locator("text='Security checkpoint'").count() > 0 or
+                        page.locator("text='Enter security code'").count() > 0
+                    )
+                except Exception:
+                    pass
+                
+                if is_checkpoint or has_captcha_element:
+                    log_message("Security checkpoint, 2FA, or CAPTCHA detected. Please complete it in the Chrome browser.", "WARNING")
+                    wait_for_user("A security checkpoint or CAPTCHA was detected. Please complete the verification in the browser and then press Enter/Confirm Logged In...", None)
+                elif is_on_login_page:
+                    log_message("You are not logged in. Please log in to Facebook first.", "WARNING")
+                    wait_for_user("Please log in to Facebook first and then press Enter/Confirm Logged In...", None)
+                else:
+                    log_message("Login successfully verified. Proceeding to target profile...", "INFO")
+                    break
             draw_progress_bar(0, report_limit)
             for i in range(report_limit):
                 if stop_requested.is_set():
@@ -809,7 +846,7 @@ def run_instagram(profile_url, report_limit):
     global active_context
     with sync_playwright() as p:
         try:
-            context = p.chromium.launch_persistent_context(user_data_dir='./chrome_profile', channel='chrome', headless=False)
+            context = p.chromium.launch_persistent_context(user_data_dir=user_data_dir, channel='chrome', headless=False, args=["--test-type"])
             active_context = context
             page = context.pages[0]
             ig_open_instagram(page, 'https://www.instagram.com/')
@@ -846,11 +883,54 @@ def run_threads(profile_url, report_limit):
     global active_context
     with sync_playwright() as p:
         try:
-            context = p.chromium.launch_persistent_context(user_data_dir='./thread_chrome_profile', channel='chrome', headless=False)
+            context = p.chromium.launch_persistent_context(user_data_dir=user_data_dir, channel='chrome', headless=False, args=["--test-type"])
             active_context = context
             page = context.pages[0]
             th_open_threads(page, 'https://www.threads.com/')
             wait_for_user("Please log in to Threads and press Enter to continue...", None)
+
+            # Verification loop to handle security checks, 2FA, phone verification, and checkpoint screens on Threads/Instagram login
+            while not stop_requested.is_set():
+                current_url = page.url
+                
+                # Check if still on the login page
+                is_on_login_page = (
+                    "login" in current_url or 
+                    page.locator("button[type='submit']:has-text('Log in')").count() > 0 or
+                    page.locator("text='Log in with Instagram'").count() > 0
+                )
+                
+                # Check for checkpoints, 2FA, phone verification, or security challenges
+                is_checkpoint = (
+                    "checkpoint" in current_url or 
+                    "challenge" in current_url or
+                    "two-factor" in current_url or 
+                    "security" in current_url or
+                    "phone" in current_url
+                )
+                
+                has_verification_element = False
+                try:
+                    has_verification_element = (
+                        page.locator("input[name='security_code']").count() > 0 or
+                        page.locator("input[type='tel']").count() > 0 or
+                        page.locator("text='Enter your security code'").count() > 0 or
+                        page.locator("text='Help us confirm it's you'").count() > 0 or
+                        page.locator("text='Verification'").count() > 0 or
+                        page.locator("text='Confirm it's You'").count() > 0
+                    )
+                except Exception:
+                    pass
+                
+                if is_checkpoint or has_verification_element:
+                    log_message("Security checkpoint, 2FA, or verification screen detected. Please complete the verification in the Chrome browser.", "WARNING")
+                    wait_for_user("A security checkpoint or verification screen was detected. Please complete it in the browser and then press Enter/Confirm Logged In...", None)
+                elif is_on_login_page:
+                    log_message("You are not logged in. Please log in to Threads/Instagram first.", "WARNING")
+                    wait_for_user("Please log in first and then press Enter/Confirm Logged In...", None)
+                else:
+                    log_message("Login successfully verified. Proceeding to target profile...", "INFO")
+                    break
             draw_progress_bar(0, report_limit)
             for i in range(report_limit):
                 if stop_requested.is_set():
@@ -882,8 +962,8 @@ def run_tiktok(profile_url, report_limit):
     with sync_playwright() as p:
         try:
             context = p.chromium.launch_persistent_context(
-                user_data_dir='./tiktok_chrome_profile', channel='chrome', headless=False,
-                ignore_default_args=["--enable-automation"], args=["--disable-blink-features=AutomationControlled"]
+                user_data_dir=user_data_dir, channel='chrome', headless=False,
+                ignore_default_args=["--enable-automation"], args=["--disable-blink-features=AutomationControlled", "--test-type"]
             )
             active_context = context
             page = context.pages[0]
@@ -915,8 +995,8 @@ def run_twitter(profile_url, report_limit):
     with sync_playwright() as p:
         try:
             context = p.chromium.launch_persistent_context(
-                user_data_dir='./twitter_chrome_profile', channel='chrome', headless=False,
-                ignore_default_args=["--enable-automation"], args=["--disable-blink-features=AutomationControlled", "--start-maximized", "--disable-infobars"], no_viewport=True
+                user_data_dir=user_data_dir, channel='chrome', headless=False,
+                ignore_default_args=["--enable-automation"], args=["--disable-blink-features=AutomationControlled", "--start-maximized", "--disable-infobars", "--test-type"], no_viewport=True
             )
             active_context = context
             page = context.pages[0]

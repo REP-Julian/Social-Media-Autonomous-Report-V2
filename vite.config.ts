@@ -7,7 +7,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     watch: {
-      ignored: ['**/*_chrome_profile/**', '**/chrome_profile/**']
+      ignored: ['**/*_chrome_profile/**', '**/chrome_profile/**', '**/playwright_user_data/**']
     }
   }
 })

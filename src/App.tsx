@@ -61,8 +61,72 @@ export default function App() {
   const [logs, setLogs] = useState<{ message: string; level: string; timestamp: string }[]>([]);
   const [status, setStatus] = useState<string>('idle');
   const [promptText, setPromptText] = useState<string | null>(null);
+  const [animatedProgress, setAnimatedProgress] = useState(0);
+  const [isPulsing, setIsPulsing] = useState(false);
+  const [logsCountAtLastMilestone, setLogsCountAtLastMilestone] = useState(0);
 
   const logsEndRef = React.useRef<HTMLDivElement>(null);
+
+  // Sync milestone log count
+  useEffect(() => {
+    setLogsCountAtLastMilestone(logs.length);
+  }, [progress]);
+
+  const segmentSize = 100 / count;
+  const currentStepLogsCount = Math.max(0, logs.length - logsCountAtLastMilestone);
+  const estimatedLogsPerCycle = 8;
+  const segmentProgress = Math.min(0.95, currentStepLogsCount / estimatedLogsPerCycle);
+  const targetProgress = isRunning
+    ? Math.min(99.5, progress + (segmentProgress * segmentSize))
+    : progress;
+
+  // Smoothly interpolate progress animation
+  useEffect(() => {
+    if (!isRunning) {
+      if (progress === 0) {
+        setAnimatedProgress(0);
+      } else {
+        let animationId: number;
+        const animate = () => {
+          setAnimatedProgress((prev) => {
+            const diff = progress - prev;
+            if (Math.abs(diff) < 0.1) {
+              return progress;
+            }
+            animationId = requestAnimationFrame(animate);
+            return prev + diff * 0.15;
+          });
+        };
+        animate();
+        return () => cancelAnimationFrame(animationId);
+      }
+      return;
+    }
+
+    let animationId: number;
+    const animate = () => {
+      setAnimatedProgress((prev) => {
+        const diff = targetProgress - prev;
+        if (Math.abs(diff) < 0.1) {
+          return targetProgress;
+        }
+        animationId = requestAnimationFrame(animate);
+        return prev + diff * 0.08;
+      });
+    };
+
+    animate();
+    return () => cancelAnimationFrame(animationId);
+  }, [targetProgress, isRunning, progress]);
+
+  // Pulse the launch button on new logs
+  useEffect(() => {
+    if (logs.length > 0 && isRunning) {
+      setIsPulsing(true);
+      const timer = setTimeout(() => setIsPulsing(false), 250);
+      return () => clearTimeout(timer);
+    }
+  }, [logs.length, isRunning]);
 
   const platforms = [
     { name: 'Facebook', icon: <Facebook className="w-5 h-5" />, color: 'text-blue-500', bg: 'bg-blue-500/10', border: 'border-blue-500', glow: 'shadow-blue-500/20' },
@@ -110,31 +174,26 @@ export default function App() {
     }
   }, [logs]);
 
-  // Auto-restart/refresh the web page 5 seconds after sequence completion
+  // Automatically reset UI and clear logs 4 seconds after sequence ends
   useEffect(() => {
     if (status === 'completed' || status === 'stopped' || status === 'error') {
       const timer = setTimeout(() => {
-        window.location.reload();
-      }, 5000);
-
-      // Append local feedback log
-      setLogs((prev) => [
-        ...prev,
-        {
-          message: `Sequence ended. The web interface will automatically refresh in 5 seconds to reset...`,
-          level: 'INFO',
-          timestamp: new Date().toLocaleTimeString()
-        }
-      ]);
-
+        setLogs([]);
+        setProgress(0);
+        setAnimatedProgress(0);
+        setStatus('idle');
+      }, 4000);
       return () => clearTimeout(timer);
     }
   }, [status]);
+
+
 
   const handleStart = async () => {
     if (!target) return;
     setIsRunning(true);
     setProgress(0);
+    setLogsCountAtLastMilestone(0);
     setPromptText(null);
     setLogs([]);
     setStatus('running');
@@ -235,6 +294,9 @@ export default function App() {
                 setPlatform(p.name);
                 setProgress(0);
                 setIsRunning(false);
+                if (target && !isValidUrl(target, p.name)) {
+                  setTarget('');
+                }
               }}
               className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl transition-all duration-300 ${platform === p.name
                   ? `${p.bg} ${p.color} font-medium shadow-lg ${p.glow} border border-white/5`
@@ -341,16 +403,21 @@ export default function App() {
                     ${(!target || !isUrlValid)
                       ? 'bg-white/5 text-neutral-500 cursor-not-allowed border border-white/5'
                       : isRunning
-                        ? 'bg-blue-600/20 text-blue-400 border border-blue-500/30'
+                        ? `bg-blue-600/25 text-blue-300 border border-blue-500/40 ${isPulsing ? 'brightness-125 scale-[1.015] shadow-blue-500/30 shadow-2xl' : ''}`
                         : 'bg-blue-600 hover:bg-blue-500 hover:shadow-blue-500/25 border border-blue-500 hover:-translate-y-0.5'
                     }`}
                 >
                   {isRunning ? (
                     <>
-                      <div className="absolute left-0 top-0 h-full bg-blue-500/20 transition-all duration-75" style={{ width: `${progress}%` }}></div>
-                      <div className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin z-10"></div>
-                      <span className="z-10">
-                        {status === 'confirming' ? 'Awaiting Login Action' : `Executing Sequence ${progress.toFixed(0)}%`}
+                      <div 
+                        className={`absolute left-0 top-0 h-full bg-gradient-to-r from-blue-500/20 to-indigo-500/30 transition-all duration-500 ease-out ${isPulsing ? 'opacity-90 bg-blue-500/30' : 'opacity-70'}`} 
+                        style={{ width: `${animatedProgress}%` }}
+                      >
+                        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-blue-400/20 to-transparent animate-shimmer"></div>
+                      </div>
+                      <div className={`w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin z-10 transition-transform duration-200 ${isPulsing ? 'scale-110 opacity-100' : 'opacity-70'}`}></div>
+                      <span className="z-10 flex items-center gap-2">
+                        {status === 'confirming' ? 'Awaiting Login Action' : `Executing Sequence ${Math.round(animatedProgress)}%`}
                       </span>
                     </>
                   ) : progress === 100 ? (

@@ -22,3 +22,12 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Playwright User Data & Profiles
+playwright_user_data/
+chrome_profile/
+facebook_chrome_profile/
+thread_chrome_profile/
+tiktok_chrome_profile/
+twitter_chrome_profile/
+
